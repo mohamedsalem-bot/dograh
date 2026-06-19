@@ -270,6 +270,12 @@ class TestDispatcherThreadsTelephonyConfig:
                 "api.services.campaign.campaign_call_dispatcher.get_backend_endpoints",
                 AsyncMock(return_value=("https://example.com", None)),
             ),
+            patch(
+                "api.services.campaign.campaign_call_dispatcher.authorize_workflow_run_start",
+                AsyncMock(
+                    return_value=SimpleNamespace(has_quota=True, error_message="")
+                ),
+            ),
         ):
             mock_db.get_workflow_by_id = AsyncMock(return_value=SimpleNamespace(id=1))
             mock_db.create_workflow_run = AsyncMock(return_value=workflow_run)
@@ -311,6 +317,13 @@ class TestDispatcherThreadsTelephonyConfig:
                 "store_workflow_from_number_mapping must persist the "
                 f"telephony_configuration_id ({config_id}); got args={store_args}, "
                 f"kwargs={store_kwargs}"
+            )
+
+            assert provider.initiate_call.await_count == 1
+            webhook_url = provider.initiate_call.await_args.kwargs["webhook_url"]
+            assert "campaign_id=" not in webhook_url, (
+                "campaign outbound answer_url should not include campaign_id; "
+                f"got {webhook_url}"
             )
 
     @pytest.mark.asyncio

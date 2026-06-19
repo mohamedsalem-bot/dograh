@@ -135,10 +135,10 @@ if [[ -z "$FASTAPI_WORKERS" ]]; then
     if [[ -t 0 ]]; then
         echo ""
         echo -e "${YELLOW}Number of FastAPI workers (uvicorn processes nginx will load-balance):${NC}"
-        read -p "[4]: " FASTAPI_WORKERS
-        FASTAPI_WORKERS="${FASTAPI_WORKERS:-4}"
+        read -p "[2]: " FASTAPI_WORKERS
+        FASTAPI_WORKERS="${FASTAPI_WORKERS:-2}"
     else
-        FASTAPI_WORKERS="4"
+        FASTAPI_WORKERS="2"
     fi
 fi
 
@@ -251,6 +251,7 @@ echo -e "${GREEN}✓ SSL certificates generated${NC}"
 
 echo -e "${BLUE}[4/$TOTAL] Creating environment file...${NC}"
 OSS_JWT_SECRET=$(openssl rand -hex 32)
+POSTGRES_PASSWORD=$(openssl rand -hex 32)
 
 cat > .env << ENV_EOF
 # Remote deployments run with production signaling and HTTPS defaults
@@ -275,6 +276,11 @@ FORCE_TURN_RELAY=$FORCE_TURN_RELAY
 
 # JWT secret for OSS authentication
 OSS_JWT_SECRET=$OSS_JWT_SECRET
+
+# PostgreSQL password. Used by the postgres container on first init and by the
+# API's DATABASE_URL. Do not change after the first start — the password is
+# baked into the postgres data volume when it is first created.
+POSTGRES_PASSWORD=$POSTGRES_PASSWORD
 
 # Telemetry (set to false to disable)
 ENABLE_TELEMETRY=$ENABLE_TELEMETRY

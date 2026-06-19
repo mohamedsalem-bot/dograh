@@ -9,36 +9,46 @@ The rules are simple:
    in storage.
 """
 
+import copy
 from typing import Any, Dict, Optional
 
-from api.schemas.user_configuration import UserConfiguration
+from api.schemas.ai_model_configuration import EffectiveAIModelConfiguration
 from api.services.configuration.registry import ServiceConfig
 from api.services.integrations import get_node_secret_fields
 
 VISIBLE_CHARS = 4  # number of trailing characters to reveal
 MASK_CHAR = "*"
 MASK_MARKER = "***"  # substring that indicates a masked key
+SERVICE_SECRET_FIELDS = ("api_key", "credentials", "aws_access_key", "aws_secret_key")
+MODEL_OVERRIDE_FIELDS = ("llm", "tts", "stt", "realtime")
 
 
-def contains_masked_key(api_key: str | list[str] | None) -> bool:
-    """Return True if *api_key* looks like a masked placeholder."""
-    if api_key is None:
+def contains_masked_key(value: str | list[str] | None) -> bool:
+    """Return True if *value* looks like a masked placeholder."""
+    if value is None:
         return False
-    keys = api_key if isinstance(api_key, list) else [api_key]
+    keys = value if isinstance(value, list) else [value]
     return any(MASK_MARKER in k for k in keys)
 
 
-def check_for_masked_keys(config: "UserConfiguration") -> None:
-    """Raise ValueError if any service in *config* still has a masked API key."""
+def check_for_masked_keys(config: "EffectiveAIModelConfiguration") -> None:
+    """Raise ValueError if any service in *config* still has a masked secret."""
     for field in ("llm", "tts", "stt", "embeddings", "realtime"):
         service = getattr(config, field, None)
         if service is None:
             continue
-        if contains_masked_key(service.get_all_api_keys()):
-            raise ValueError(
-                f"The {field} api_key appears to be masked. "
-                "Please provide the actual API key, not the masked value."
-            )
+        for secret_field in SERVICE_SECRET_FIELDS:
+            if not hasattr(service, secret_field):
+                continue
+            if secret_field == "api_key" and hasattr(service, "get_all_api_keys"):
+                secret_value = service.get_all_api_keys()
+            else:
+                secret_value = getattr(service, secret_field, None)
+            if contains_masked_key(secret_value):
+                raise ValueError(
+                    f"The {field} {secret_field} appears to be masked. "
+                    "Please provide the actual value, not the masked value."
+                )
 
 
 def mask_key(real_key: str, visible: int = VISIBLE_CHARS) -> str:
@@ -57,6 +67,12 @@ def mask_key(real_key: str, visible: int = VISIBLE_CHARS) -> str:
 
     masked_part = MASK_CHAR * (len(real_key) - visible)
     return f"{masked_part}{real_key[-visible:]}"
+
+
+def _mask_secret_value(value: str | list[str]) -> str | list[str]:
+    if isinstance(value, list):
+        return [mask_key(k) for k in value]
+    return mask_key(value)
 
 
 def is_mask_of(masked: str, real_key: str) -> bool:
@@ -95,7 +111,7 @@ def resolve_masked_api_keys(
 
 
 # ---------------------------------------------------------------------------
-# High-level helpers for UserConfiguration objects
+# High-level helpers for EffectiveAIModelConfiguration objects
 # ---------------------------------------------------------------------------
 
 
@@ -105,16 +121,15 @@ def _mask_service(service_cfg: Optional[ServiceConfig]) -> Optional[Dict[str, An
 
     # Work on a dict copy so we don't mutate original models
     data = service_cfg.model_dump()
-    if "api_key" in data and data["api_key"]:
-        raw = data["api_key"]
-        if isinstance(raw, list):
-            data["api_key"] = [mask_key(k) for k in raw]
-        else:
-            data["api_key"] = mask_key(raw)
+    for secret_field in SERVICE_SECRET_FIELDS:
+        if secret_field not in data or not data[secret_field]:
+            continue
+        raw = data[secret_field]
+        data[secret_field] = _mask_secret_value(raw)
     return data
 
 
-def mask_user_config(config: UserConfiguration) -> Dict[str, Any]:
+def mask_user_config(config: EffectiveAIModelConfiguration) -> Dict[str, Any]:
     """Return a JSON-serialisable dict of *config* with every api_key masked."""
 
     return {
@@ -127,6 +142,42 @@ def mask_user_config(config: UserConfiguration) -> Dict[str, Any]:
         "test_phone_number": config.test_phone_number,
         "timezone": config.timezone,
     }
+
+
+def mask_workflow_configurations(config: Optional[Dict]) -> Optional[Dict]:
+    """Mask secret fields inside workflow-level model overrides for API responses."""
+    if not config:
+        return config
+
+    masked = copy.deepcopy(config)
+    model_overrides = masked.get("model_overrides")
+    if isinstance(model_overrides, dict):
+        for section in MODEL_OVERRIDE_FIELDS:
+            override = model_overrides.get(section)
+            if not isinstance(override, dict):
+                continue
+            for secret_field in SERVICE_SECRET_FIELDS:
+                raw = override.get(secret_field)
+                if raw:
+                    override[secret_field] = _mask_secret_value(raw)
+
+    v2_override = masked.get("model_configuration_v2_override")
+    if isinstance(v2_override, dict):
+        _mask_nested_service_secrets(v2_override)
+
+    return masked
+
+
+def _mask_nested_service_secrets(value):
+    if isinstance(value, dict):
+        for key, nested in list(value.items()):
+            if key in SERVICE_SECRET_FIELDS and nested:
+                value[key] = _mask_secret_value(nested)
+            else:
+                _mask_nested_service_secrets(nested)
+    elif isinstance(value, list):
+        for item in value:
+            _mask_nested_service_secrets(item)
 
 
 # ---------------------------------------------------------------------------

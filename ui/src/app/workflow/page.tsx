@@ -1,10 +1,13 @@
 import { Suspense } from 'react';
 
-import { getWorkflowsApiV1WorkflowFetchGet } from '@/client/sdk.gen';
-import type { WorkflowListResponse } from '@/client/types.gen';
+import { getWorkflowsApiV1WorkflowFetchGet, listFoldersApiV1FolderGet } from '@/client/sdk.gen';
+import type { FolderResponse, WorkflowListResponse } from '@/client/types.gen';
+import { Card, CardContent } from '@/components/ui/card';
 import { CreateWorkflowButton } from "@/components/workflow/CreateWorkflowButton";
+import { AgentFolderView } from '@/components/workflow/folders/AgentFolderView';
+import { CreateFolderButton } from '@/components/workflow/folders/CreateFolderButton';
+import { FolderSection } from '@/components/workflow/folders/FolderSection';
 import { UploadWorkflowButton } from '@/components/workflow/UploadWorkflowButton';
-import { WorkflowTable } from "@/components/workflow/WorkflowTable";
 import { getServerAccessToken, getServerAuthProvider } from '@/lib/auth/server';
 import logger from '@/lib/logger';
 
@@ -54,25 +57,40 @@ async function WorkflowList() {
             .filter((w: WorkflowListResponse) => w.status === 'archived')
             .sort((a: WorkflowListResponse, b: WorkflowListResponse) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
+        // Fetch folders for grouping active agents. A failure here shouldn't
+        // break the page — fall back to an empty list (flat, ungrouped view).
+        let folders: FolderResponse[] = [];
+        try {
+            const foldersResponse = await listFoldersApiV1FolderGet({
+                headers: {
+                    'Authorization': `Bearer ${accessToken}`,
+                },
+            });
+            folders = foldersResponse.data ?? [];
+        } catch (folderErr) {
+            logger.error(`Error fetching folders: ${folderErr}`);
+        }
+
         return (
             <>
                 {/* Active Workflows Section */}
                 <div className="mb-8">
                     <h2 className="text-xl font-semibold mb-4">Active Agents</h2>
-                    {activeWorkflows.length > 0 ? (
-                        <WorkflowTable workflows={activeWorkflows} showArchived={false} />
+                    {activeWorkflows.length > 0 || folders.length > 0 ? (
+                        <AgentFolderView workflows={activeWorkflows} folders={folders} />
                     ) : (
-                        <div className="text-muted-foreground bg-muted rounded-lg p-8 text-center">
-                            No active workflows found. Create your first workflow to get started.
-                        </div>
+                        <Card>
+                            <CardContent className="p-8 text-center text-muted-foreground">
+                                No active workflows found. Create your first workflow to get started.
+                            </CardContent>
+                        </Card>
                     )}
                 </div>
 
-                {/* Archived Workflows Section */}
+                {/* Archived Section — collapsible, same design as the folder/Uncategorized sections */}
                 {archivedWorkflows.length > 0 && (
                     <div className="mb-8">
-                        <h2 className="text-xl font-semibold mb-4 text-muted-foreground">Archived Workflows</h2>
-                        <WorkflowTable workflows={archivedWorkflows} showArchived={true} />
+                        <FolderSection kind="archived" workflows={archivedWorkflows} />
                     </div>
                 )}
             </>
@@ -99,6 +117,7 @@ async function PageContent() {
                     <h1 className="text-2xl font-bold">Your Agents</h1>
                     <div className="flex gap-2">
                         <UploadWorkflowButton />
+                        <CreateFolderButton />
                         <CreateWorkflowButton />
                     </div>
                 </div>
@@ -116,7 +135,11 @@ function WorkflowsLoading() {
                 <div className="h-8 w-48 bg-muted rounded mb-6"></div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {Array.from({ length: 3 }, (_, i) => (
-                        <div key={i} className="bg-muted rounded-lg h-40"></div>
+                        <Card key={i}>
+                            <CardContent className="p-0">
+                                <div className="h-40 bg-muted/70" />
+                            </CardContent>
+                        </Card>
                     ))}
                 </div>
             </div>
@@ -127,7 +150,11 @@ function WorkflowsLoading() {
                     <div className="h-8 w-48 bg-muted rounded"></div>
                     <div className="h-10 w-32 bg-muted rounded"></div>
                 </div>
-                <div className="bg-muted rounded-lg h-96"></div>
+                <Card>
+                    <CardContent className="p-0">
+                        <div className="h-96 bg-muted/70" />
+                    </CardContent>
+                </Card>
             </div>
         </div>
     );

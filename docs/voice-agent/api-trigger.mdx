@@ -14,7 +14,12 @@ This is useful when you want to trigger calls from your own backend, a CRM, or w
 
 ## Finding your trigger URL
 
-When you add an API Trigger node to your workflow, Dograh assigns it a unique UUID. The trigger node exposes two URLs that share this UUID — one for the published agent and one for the latest draft. You can copy either URL from the trigger node's settings dialog.
+When you add an API Trigger node to your workflow, Dograh assigns it a unique UUID. The trigger node exposes two URLs that share this UUID:
+
+- A **production URL** for the published workflow
+- A **test URL** for the latest draft
+
+You can copy either URL from the trigger node's settings dialog.
 
 ```
 POST https://your-dograh-instance/api/v1/public/agent/{uuid}        # Production
@@ -30,7 +35,15 @@ If you are using the hosted version, replace `your-dograh-instance` with `api.do
 | Production | `/api/v1/public/agent/{uuid}`      | The published version of the agent.                                       |
 | Test       | `/api/v1/public/agent/test/{uuid}` | The latest draft. Falls back to the published version if no draft exists. |
 
-Use the test URL while iterating on changes so production traffic continues to hit the published version. Once you publish your draft, both URLs run the same definition.
+Use the test URL while iterating on changes so production traffic continues to hit the published version.
+
+The production URL only executes a **published** workflow. If you update the workflow but do not publish it, the production trigger will continue to run the older published version.
+
+Once you publish your draft, both URLs run the same definition.
+
+<Warning>
+A common pitfall is editing the workflow, saving the draft, and then calling the production trigger URL expecting the new behavior. That will not work until you publish the workflow. Use the test URL to verify draft changes before publishing.
+</Warning>
 
 The request body, headers, and response shape are identical for both URLs.
 
@@ -38,7 +51,8 @@ The request body, headers, and response shape are identical for both URLs.
 
 Authenticate by passing your API key in the `X-API-Key` header. The request body requires a `phone_number` and accepts optional `initial_context` and `telephony_configuration_id` fields.
 
-```bash
+<CodeGroup>
+```bash Production URL
 curl -X POST https://your-dograh-instance/api/v1/public/agent/{uuid} \
   -H "Content-Type: application/json" \
   -H "X-API-Key: dg_your_api_key" \
@@ -51,9 +65,25 @@ curl -X POST https://your-dograh-instance/api/v1/public/agent/{uuid} \
   }'
 ```
 
+```bash Test URL
+curl -X POST https://your-dograh-instance/api/v1/public/agent/test/{uuid} \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: dg_your_api_key" \
+  -d '{
+    "phone_number": "+14155550100",
+    "initial_context": {
+      "customer_name": "Jane",
+      "appointment_date": "March 15"
+    }
+  }'
+```
+</CodeGroup>
+
+Use the test URL when you want to verify draft changes before publishing.
+
 ### Response
 
-A successful request returns a `workflow_run_id` that you can use to [retrieve call details](/api-reference/calls/get-run), recordings, and transcripts.
+A successful request returns a `workflow_run_id` that you can use to [retrieve run details](/api-reference/runs/get-run), recordings, and transcripts.
 
 ```json
 {
@@ -88,7 +118,7 @@ For example, if your request includes:
 }
 ```
 
-You can reference the user's name in your prompt as `{{initial_context.user.name}}`.
+You can reference the user's name in your agent prompt as `{{user.name}}` — in Agent prompts, `initial_context` fields are referenced directly by name (not prefixed with `initial_context.`). See [template variables](/voice-agent/template-variables) for the exact syntax in prompts versus webhook payloads.
 
 See [Context & Variables](/core-concepts/context-and-variables) for more on how data flows through a call.
 
@@ -106,5 +136,5 @@ By default, calls are placed through your organization's default outbound [telep
 The id is shown on each row in **Telephony configurations** (`https://app.dograh.com/telephony-configurations` for hosted or `http://localhost:3010/telephony-configurations` for local). The configuration must belong to the same organization as the API Trigger; otherwise the request returns `404`.
 
 <Note>
-For full endpoint details including all parameters and response fields, see the [API reference](/api-reference/calls/trigger).
+For full endpoint details including all parameters and response fields, see the [API reference](/api-reference/runs/trigger).
 </Note>
